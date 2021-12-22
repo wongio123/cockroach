@@ -126,7 +126,7 @@ require (
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5
 	github.com/pierrre/geohash v1.0.0
 	github.com/pkg/browser v0.0.0-20180916011732-0a3d74bf9ce4
-	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/prometheus/client_golang v1.11.0
 	github.com/prometheus/client_model v0.2.1-0.20210607210712-147c58e9608a
@@ -170,7 +170,7 @@ require (
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	golang.org/x/tools v0.1.7
 	google.golang.org/api v0.63.0
-	google.golang.org/genproto v0.0.0-20211208223120-3a66f561d7aa
+	google.golang.org/genproto v0.0.0-20211222154725-9823f7ba7562
 	google.golang.org/grpc v1.43.0
 	google.golang.org/grpc/examples v0.0.0-20210324172016-702608ffae4d // indirect
 	google.golang.org/protobuf v1.27.1

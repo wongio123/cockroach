@@ -1473,11 +1473,13 @@ type fakePubsubClient struct {
 	buffer *mockPubsubMessageBuffer
 }
 
-func (p *fakePubsubClient) openTopics(_ string) error {
+var _ pubsubClient = (*fakePubsubClient)(nil)
+
+func (p *fakePubsubClient) openTopics() error {
 	return nil
 }
 
-func (p *fakePubsubClient) closeTopics(_ string) {
+func (p *fakePubsubClient) closeTopics() {
 }
 
 // sendMessage sends a message to the topic
@@ -1487,7 +1489,7 @@ func (p *fakePubsubClient) sendMessage(m []byte, _ descpb.ID, _ string) error {
 	return nil
 }
 
-func (p *fakePubsubClient) sendMessageToAllTopics(m []byte, _ string) error {
+func (p *fakePubsubClient) sendMessageToAllTopics(m []byte) error {
 	message := mockPubsubMessage{data: string(m)}
 	p.buffer.push(message)
 	return nil
@@ -1548,7 +1550,7 @@ func (p *pubsubFeedFactory) Feed(create string, args ...interface{}) (cdctest.Te
 	createStmt := parsed.AST.(*tree.CreateChangefeed)
 
 	if createStmt.SinkURI == nil {
-		createStmt.SinkURI = tree.NewStrVal("gcppubsub://testfeed")
+		createStmt.SinkURI = tree.NewStrVal(GcpScheme + "://testfeed?region=testfeedRegion")
 	}
 
 	if err != nil {
@@ -1556,7 +1558,11 @@ func (p *pubsubFeedFactory) Feed(create string, args ...interface{}) (cdctest.Te
 	}
 	ss := &sinkSynchronizer{}
 
-	client := &fakePubsubClient{buffer: &mockPubsubMessageBuffer{rows: make([]mockPubsubMessage, 0)}}
+	client := &fakePubsubClient{
+		buffer: &mockPubsubMessageBuffer{
+			rows: make([]mockPubsubMessage, 0),
+		},
+	}
 
 	wrapSink := func(s Sink) Sink {
 		return &fakePubsubSink{

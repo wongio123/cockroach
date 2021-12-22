@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/Shopify/sarama"
+	"github.com/cockroachdb/cockroach/pkg/ccl/changefeedccl"
 	"github.com/cockroachdb/cockroach/pkg/ccl/changefeedccl/cdctest"
 	"github.com/cockroachdb/cockroach/pkg/ccl/changefeedccl/changefeedbase"
 	"github.com/cockroachdb/cockroach/pkg/cmd/roachtest/cluster"
@@ -152,7 +153,7 @@ func cdcBasicTest(ctx context.Context, t test.Test, c cluster.Cluster, args cdcT
 
 		sinkURI = fmt.Sprintf("webhook-%s", sinkDestHost.String())
 	} else if args.whichSink == pubsubSink {
-		sinkURI = `gcppubsub://cockroach-ephemeral` + "?AUTH=implicit&topic_name=pubsubSink-roachtest"
+		sinkURI = changefeedccl.GcpScheme + `://cockroach-ephemeral` + "?AUTH=implicit&topic_name=pubsubSink-roachtest"
 	} else {
 		t.Status("installing kafka")
 		kafka.install(ctx)

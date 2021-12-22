@@ -24,10 +24,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const credentialsParam = "CREDENTIALS"
-const gcpScheme = "gcppubsub"
+const GcpScheme = "gcpubsub"
 const gcpScope = "https://www.googleapis.com/auth/pubsub"
 
 // TODO: make numOfWorkers configurable
@@ -35,21 +37,15 @@ const numOfWorkers = 128
 
 // isPubsubSInk returns true if url contains scheme with valid pubsub sink
 func isPubsubSink(u *url.URL) bool {
-	switch u.Scheme {
-	case gcpScheme:
-		return true
-	default:
-		return false
-	}
+	return u.Scheme == GcpScheme
 }
 
-//  i dont really like having getTopicName in the interface but fullname test requires it
 type pubsubClient interface {
-	openTopics(string) error
-	closeTopics(string)
+	openTopics() error
+	closeTopics()
 	flushTopics()
 	sendMessage([]byte, descpb.ID, string) error
-	sendMessageToAllTopics([]byte, string) error
+	sendMessageToAllTopics([]byte) error
 	getTopicName(descpb.ID) string
 }
 
@@ -69,12 +65,13 @@ type pubsubMessage struct {
 }
 
 type gcpPubsubClient struct {
-	client    *pubsub.Client
-	topics    map[descpb.ID]*topicStruct
-	ctx       context.Context
-	projectID string
-	region    string
-	url       sinkURL
+	client        *pubsub.Client
+	topics        map[descpb.ID]*topicStruct
+	ctx           context.Context
+	projectID     string
+	region        string
+	url           sinkURL
+	withTopicName string
 }
 
 type topicStruct struct {
@@ -97,16 +94,10 @@ type pubsubSink struct {
 	// errChan is written to indicate an error while sending message.
 	errChan chan error
 
-	withTopicName string
-
 	client pubsubClient
 }
 
-// my idea is to force this to be an interface so it adheres to api, but not too sure since Sink is already an API
-//func getPubsubSinkObject(url sinkURL, withTopicName bool) pubsubSink {
-//	return &pubsubSinkObject{url: url, withTopicName: withTopicName}
-//}
-
+// TODO: unify gcp credentials code with gcp cloud storage credentials code
 // getGCPCredentials returns gcp credentials parsed out from url
 func getGCPCredentials(ctx context.Context, u sinkURL) (*google.Credentials, error) {
 	const authParam = "AUTH"
@@ -168,29 +159,38 @@ func MakePubsubSink(
 
 	ctx, cancel := context.WithCancel(ctx)
 	p := &pubsubSink{
-		workerCtx: ctx, numWorkers: numOfWorkers,
-		exitWorkers: cancel, withTopicName: pubsubTopicName,
+		workerCtx:   ctx,
+		numWorkers:  numOfWorkers,
+		exitWorkers: cancel,
 	}
 
 	// creates custom pubsub object based on scheme
 	switch u.Scheme {
-	case gcpScheme:
+	case GcpScheme:
 		const regionParam = "region"
 		projectID := pubsubURL.Host
 		region := pubsubURL.consumeParam(regionParam)
-		g := &gcpPubsubClient{topics: p.getTopicsMap(targets, pubsubTopicName),
-			ctx: ctx, projectID: projectID, region: region, url: pubsubURL}
+		if region == "" {
+			return nil, errors.New("region query parameter not found")
+		}
+		g := &gcpPubsubClient{
+			topics:        p.getTopicsMap(targets, pubsubTopicName),
+			ctx:           ctx,
+			projectID:     projectID,
+			region:        region,
+			url:           pubsubURL,
+			withTopicName: pubsubTopicName,
+		}
 		p.client = g
 		return p, nil
 	default:
-		_ = p.Close()
 		return nil, errors.Errorf("unknown scheme: %s", u.Scheme)
 	}
 }
 
 func (p *pubsubSink) Dial() error {
 	p.setupWorkers()
-	err := p.client.openTopics(p.withTopicName)
+	err := p.client.openTopics()
 	return err
 }
 
@@ -237,7 +237,7 @@ func (p *pubsubSink) EmitResolvedTimestamp(
 		return errors.Wrap(err, "encoding resolved timestamp")
 	}
 
-	return p.client.sendMessageToAllTopics(payload, p.withTopicName)
+	return p.client.sendMessageToAllTopics(payload)
 }
 
 // Flush blocks until all messages in the event channels are sent
@@ -267,7 +267,7 @@ func (p *pubsubSink) Flush(ctx context.Context) error {
 
 // Close closes all the channels and shutdowns the topic
 func (p *pubsubSink) Close() error {
-	p.client.closeTopics(p.withTopicName)
+	p.client.closeTopics()
 	p.exitWorkers()
 	_ = p.workerGroup.Wait()
 	if p.errChan != nil {
@@ -299,7 +299,7 @@ func (p *pubsubSink) getTopicsMap(
 	//creates a topic for each target
 	for id, target := range targets {
 		var topicName string
-		if p.withTopicName != "" {
+		if pubsubTopicName != "" {
 			topicName = pubsubTopicName
 		} else {
 			topicName = target.StatementTimeName
@@ -407,7 +407,7 @@ func (p *pubsubSink) flushWorkers() error {
 }
 
 // Dial connects to gcp client and opens a topic
-func (p *gcpPubsubClient) openTopics(withTopicName string) error {
+func (p *gcpPubsubClient) openTopics() error {
 	var client *pubsub.Client
 	var err error
 
@@ -418,47 +418,35 @@ func (p *gcpPubsubClient) openTopics(withTopicName string) error {
 	// Sending messages to the same region ensures they are received in order
 	// even when multiple publishers are used.
 	// region can be changed from query parameter to config option
-	if p.region != "" {
-		client, err = pubsub.NewClient(p.ctx, p.projectID, option.WithCredentials(creds), option.WithEndpoint(p.region))
-	} else {
-		client, err = pubsub.NewClient(p.ctx, p.projectID, option.WithCredentials(creds), option.WithEndpoint(p.region))
-	}
+
+	client, err = pubsub.NewClient(
+		p.ctx,
+		p.projectID,
+		option.WithCredentials(creds),
+		option.WithEndpoint(p.region),
+	)
 
 	if err != nil {
 		return errors.Wrap(err, "opening client")
 	}
 	p.client = client
 
-	var withTopicNameClient *pubsub.Topic
-	if withTopicName != "" {
-		withTopicNameClient, err = p.openTopic(withTopicName)
+	return p.forEachTopic(func(id descpb.ID, t *topicStruct) error {
+		t.topicClient, err = p.openTopic(t.topicName)
 		if err != nil {
 			return err
 		}
-	}
-
-	for _, topic := range p.topics {
-		if withTopicName != "" {
-			topic.topicClient = withTopicNameClient
-		} else {
-			topic.topicClient, err = p.openTopic(topic.topicName)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
+// openTopic optimistically creates the topic
 func (p *gcpPubsubClient) openTopic(topicName string) (*pubsub.Topic, error) {
-	t := p.client.Topic(topicName)
-	topicExist, err := t.Exists(p.ctx)
+	t, err := p.client.CreateTopic(p.ctx, topicName)
 	if err != nil {
-		return nil, errors.Wrap(err, "opening topic")
-	}
-	if !topicExist {
-		t, err = p.client.CreateTopic(p.ctx, topicName)
-		if err != nil {
+		if status.Code(err) == codes.AlreadyExists {
+			t = p.client.Topic(topicName)
+		} else {
 			return nil, err
 		}
 	}
@@ -466,14 +454,11 @@ func (p *gcpPubsubClient) openTopic(topicName string) (*pubsub.Topic, error) {
 	return t, nil
 }
 
-func (p *gcpPubsubClient) closeTopics(withTopicName string) {
-	for _, topicStruct := range p.topics {
-		topicStruct.topicClient.Stop()
-		// only need to shutdown one topic if they are all sent to the same one
-		if withTopicName != "" {
-			break
-		}
-	}
+func (p *gcpPubsubClient) closeTopics() {
+	_ = p.forEachTopic(func(id descpb.ID, t *topicStruct) error {
+		t.topicClient.Stop()
+		return nil
+	})
 }
 
 // sendMessage sends a message to the topic
@@ -497,19 +482,14 @@ func (p *gcpPubsubClient) sendMessage(m []byte, topicID descpb.ID, key string) e
 	return nil
 }
 
-func (p *gcpPubsubClient) sendMessageToAllTopics(m []byte, withTopicName string) error {
-	for topicID := range p.topics {
-		err := p.sendMessage(m, topicID, "")
+func (p *gcpPubsubClient) sendMessageToAllTopics(m []byte) error {
+	return p.forEachTopic(func(ID descpb.ID, _ *topicStruct) error {
+		err := p.sendMessage(m, ID, "")
 		if err != nil {
 			return errors.Wrap(err, "emitting resolved timestamp")
 		}
-
-		// if with topic name option is set then you only need to send out to one of the topics
-		if withTopicName != "" {
-			break
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (p *gcpPubsubClient) getTopicName(topicID descpb.ID) string {
@@ -519,8 +499,33 @@ func (p *gcpPubsubClient) getTopicName(topicID descpb.ID) string {
 	return ""
 }
 
-func (p *gcpPubsubClient) flushTopics() {
-	for _, topicStruct := range p.topics {
-		topicStruct.topicClient.Flush()
+// getAllTopics return a map of the topics. If withTopicName is set
+// then it will just return a map of the first key/val
+func (p *gcpPubsubClient) getAllTopics() map[descpb.ID]*topicStruct {
+	if p.withTopicName != "" {
+		for ID, t := range p.topics {
+			m := make(map[descpb.ID]*topicStruct)
+			m[ID] = t
+			return m
+		}
 	}
+	return p.topics
+}
+
+func (p *gcpPubsubClient) flushTopics() {
+	_ = p.forEachTopic(func(_ descpb.ID, t *topicStruct) error {
+		t.topicClient.Flush()
+		return nil
+	})
+}
+
+func (p *gcpPubsubClient) forEachTopic(f func(descpb.ID, *topicStruct) error) error {
+	topics := p.getAllTopics()
+	for topicID, topicStruct := range topics {
+		err := f(topicID, topicStruct)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
