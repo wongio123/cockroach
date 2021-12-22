@@ -29,6 +29,8 @@ import (
 )
 
 const credentialsParam = "CREDENTIALS"
+
+// GcpScheme to be used in testfeed and sink.go
 const GcpScheme = "gcpubsub"
 const gcpScope = "https://www.googleapis.com/auth/pubsub"
 
