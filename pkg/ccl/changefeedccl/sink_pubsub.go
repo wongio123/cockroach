@@ -11,6 +11,7 @@ package changefeedccl
 import (
 	"context"
 	"encoding/json"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"hash/crc32"
 	"net/url"
 
@@ -26,6 +27,9 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
 )
 
 const credentialsParam = "CREDENTIALS"
@@ -66,14 +70,24 @@ type pubsubMessage struct {
 	topicID descpb.ID
 }
 
+type awsPubsubClient struct {
+	url            sinkURL
+	client         *sns.Client
+	topicIDToName  map[descpb.ID]string
+	topicNameToArn map[string]string
+	withTopicName  string
+	ctx            context.Context
+}
+
 type gcpPubsubClient struct {
-	client        *pubsub.Client
-	topics        map[descpb.ID]*topicStruct
-	ctx           context.Context
-	projectID     string
-	region        string
-	url           sinkURL
-	withTopicName string
+	client            *pubsub.Client
+	topicIDToName     map[descpb.ID]string
+	topicNameToClient map[string]*pubsub.Topic
+	ctx               context.Context
+	projectID         string
+	region            string
+	url               sinkURL
+	withTopicName     string
 }
 
 type topicStruct struct {
@@ -530,4 +544,93 @@ func (p *gcpPubsubClient) forEachTopic(f func(descpb.ID, *topicStruct) error) er
 		}
 	}
 	return nil
+}
+
+func (p *awsPubsubClient) getAllTopics() map[descpb.ID]*topicStruct {
+	if p.withTopicName != "" {
+		for ID, t := range p.topics {
+			m := make(map[descpb.ID]*topicStruct)
+			m[ID] = t
+			return m
+		}
+	}
+	return p.topics
+}
+
+func (p *awsPubsubClient) forEachTopic(f func(descpb.ID, *topicStruct) error) error {
+	topics := p.getAllTopics()
+	for topicID, topicStruct := range topics {
+		err := f(topicID, topicStruct)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *awsPubsubClient) openTopics() error {
+	const AWS_ACCESS_KEY_ID = "AWS_ACCESS_KEY_ID"
+	const AWS_SECRET_ACCESS_KEY = "AWS_SECRET_ACCESS_KEY"
+	const AWS_SESSION_TOKEN = "AWS_SESSION_TOKEN"
+	const AWS_REGION = "AWS_REGION"
+
+	keyID := p.url.consumeParam(AWS_ACCESS_KEY_ID)
+	key := p.url.consumeParam(AWS_SECRET_ACCESS_KEY)
+	token := p.url.consumeParam(AWS_SESSION_TOKEN)
+	region := p.url.consumeParam(AWS_REGION)
+
+	creds := credentials.NewStaticCredentialsProvider(keyID, key, token)
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithCredentialsProvider(creds),
+		config.WithRegion(region),
+	)
+	if err != nil {
+		return err
+	}
+
+	p.client = sns.NewFromConfig(cfg)
+	attributes := make(map[string]string)
+	attributes["FifoTopic"] = "true"
+
+	return p.forEachTopic(func(id descpb.ID, topicName string) error {
+		input := &sns.CreateTopicInput{
+			Name: &topicName, Attributes: attributes,
+		}
+		_, err := p.client.CreateTopic(p.ctx, input)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
+}
+func (p *awsPubsubClient) closeTopics() {
+}
+func (p *awsPubsubClient) flushTopics() {
+}
+func (p *awsPubsubClient) sendMessage(m []byte, ID descpb.ID, _ string) error {
+	topicArn := p.getTopicArn(ID)
+	msg := string(m)
+	input := &sns.PublishInput{
+		Message:  &msg,
+		TopicArn: &topicArn,
+	}
+	_, err := p.client.Publish(p.ctx, input)
+	return err
+}
+func (p *awsPubsubClient) sendMessageToAllTopics(m []byte) error {
+	return p.forEachTopic(func(ID descpb.ID, _ string) error {
+		err := p.sendMessage(m, ID, "")
+		if err != nil {
+			return errors.Wrap(err, "emitting resolved timestamp")
+		}
+		return nil
+	})
+}
+
+func (p *awsPubsubClient) getTopicName(ID descpb.ID) string {
+	if topicName, ok := p.topicIDToName[ID]; ok {
+		return topicName
+	}
+	return ""
 }

@@ -25,10 +25,11 @@ require (
 	github.com/apache/arrow/go/arrow v0.0.0-20200923215132-ac86123a3f01
 	github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e
 	github.com/aws/aws-sdk-go v1.40.37
-	github.com/aws/aws-sdk-go-v2 v1.9.1
-	github.com/aws/aws-sdk-go-v2/config v1.8.2
+	github.com/aws/aws-sdk-go-v2 v1.11.2
+	github.com/aws/aws-sdk-go-v2/config v1.11.1
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.18.0
 	github.com/aws/aws-sdk-go-v2/service/iam v1.10.0
+	github.com/aws/aws-sdk-go-v2/service/sns v1.13.0
 	github.com/axiomhq/hyperloglog v0.0.0-20181223111420-4b99d0c2c99e
 	github.com/bazelbuild/rules_go v0.26.0
 	github.com/biogo/store v0.0.0-20160505134755-913427a1d5e8
@@ -126,7 +127,7 @@ require (
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5
 	github.com/pierrre/geohash v1.0.0
 	github.com/pkg/browser v0.0.0-20180916011732-0a3d74bf9ce4
-	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/prometheus/client_golang v1.11.0
 	github.com/prometheus/client_model v0.2.1-0.20210607210712-147c58e9608a
@@ -201,13 +202,15 @@ require (
 	github.com/alexbrainman/sspi v0.0.0-20180613141037-e580b900e9f5 // indirect
 	github.com/apache/thrift v0.13.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20200907205600-7a23bdc65eef // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.4.2 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.5.1 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/ini v1.2.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.3.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.4.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.7.1 // indirect
-	github.com/aws/smithy-go v1.8.0 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.6.5 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.8.2 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.2 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.0.2 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/ini v1.3.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.5.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.7.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.12.0 // indirect
+	github.com/aws/smithy-go v1.9.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bgentry/go-netrc v0.0.0-20140422174119-9fd32a8b3d3d // indirect
 	github.com/cenkalti/backoff/v4 v4.1.1 // indirect
